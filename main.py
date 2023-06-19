@@ -15,35 +15,6 @@ import open3d as o3d
 import torch
 
 
-
-def get_closed_faces(th_faces):
-    close_faces = np.array(
-        [
-            [92, 38, 122],
-            [234, 92, 122],
-            [239, 234, 122],
-            [279, 239, 122],
-            [215, 279, 122],
-            [215, 122, 118],
-            [215, 118, 117],
-            [215, 117, 119],
-            [215, 119, 120],
-            [215, 120, 108],
-            [215, 108, 79],
-            [215, 79, 78],
-            [215, 78, 121],
-            [214, 215, 121],
-        ]
-    )
-    closed_faces = np.concatenate([th_faces, close_faces], axis=0)
-    # Indices of faces added during closing --> should be ignored as they match the wrist
-    # part of the hand, which is not an external surface of the human
-
-    # Valid because added closed faces are at the end
-    hand_ignore_faces = [1538, 1539, 1540, 1541, 1542, 1543, 1544, 1545, 1546, 1547, 1548, 1549, 1550, 1551]
-
-    return closed_faces, hand_ignore_faces
-
 def dict_for_connected_faces(faces):
     v2f = {}
     for f_id, face in enumerate(faces):
@@ -66,7 +37,7 @@ def geneSampleInfos_quick(data):
 #     verts = verts * scale + mesh.center_mass
 #     return verts
 
-def geneSampleInfos(fname_lists, hand_verts, hand_faces, object_verts, object_faces, scale=1):
+def geneSampleInfos(fname_lists, mesh1_verts, mesh1_faces, mesh2_verts, mesh2_faces, scale=1):
     """
     Args:
         scale (float): convert to meters
@@ -76,7 +47,7 @@ def geneSampleInfos(fname_lists, hand_verts, hand_faces, object_verts, object_fa
     sample_infos = []
 
     for hand_vert, hand_face, obj_vert, obj_face in tqdm(zip(
-        hand_verts, hand_faces, object_verts, object_faces
+        mesh1_verts, mesh1_faces, mesh2_verts, mesh2_faces
     )):
         sample_info = {
             "file_names": fname_lists,
@@ -151,10 +122,10 @@ if __name__ == "__main__":
     # vhacd_exe = "/ghome/l5/ymliu/3rdparty/VHACD_bin/testVHACD"
 
     sample_infos = geneSampleInfos(fname_lists=[data_path],
-                                   hand_verts=[mesh1.vertices],
-                                   hand_faces=[mesh1.faces],
-                                   object_verts=[mesh2.vertices],
-                                   object_faces=[mesh2.faces],
+                                   mesh1_verts=[mesh1.vertices],
+                                   mesh1_faces=[mesh1.faces],
+                                   mesh2_verts=[mesh2.vertices],
+                                   mesh2_faces=[mesh2.faces],
                                    scale=0.1)
     
     print("<---- Get Sample Info Done ---->")
