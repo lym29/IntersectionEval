@@ -19,77 +19,13 @@ import re
 teeth_order = {"upper": [17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27],
                "lower": [37, 36, 35, 34, 33, 32, 31, 41, 42, 43, 44, 45, 46, 47]}
 
-
-def geneSampleInfos(fname_lists, mesh1_verts, mesh1_faces, mesh2_verts, mesh2_faces, scale=1):
-    """
-    Args:
-        scale (float): convert to meters
-    """
-    # object_faces = [ obj_face[:, ::-1]for obj_face in object_faces]  # CCW to CW
-
-    sample_infos = []
-
-    for mesh1_vert, mesh1_face, mesh2_vert, mesh2_face in tqdm(zip(
-        mesh1_verts, mesh1_faces, mesh2_verts, mesh2_faces
-    )):
-        sample_info = {
-            "file_names": fname_lists,
-            "mesh1_vert": mesh1_vert * scale,
-            "mesh1_face": mesh1_face,
-            "mesh2_vert": mesh2_vert * scale,
-            "mesh2_face": mesh2_face,
-        }
-
-        mesh_1 = trimesh.Trimesh(sample_info["mesh1_vert"], sample_info["mesh1_face"])
-        mesh_2 = trimesh.Trimesh(sample_info["mesh2_vert"], sample_info["mesh2_face"])
-
-        trimesh.repair.fix_normals(mesh_1)
-        result_close, result_distance, _ = trimesh.proximity.closest_point(
-            mesh_1, sample_info["mesh2_vert"]
-        )
-        penetrating, exterior = mesh_vert_int_exts(
-        mesh_1, mesh_2.vertices, result_distance
-        )
-        sample_info["max_depth"] = 0 if penetrating.sum() == 0 else result_distance[penetrating == 1].max()
-
-        sample_infos.append(sample_info)
-
-    return sample_infos
-
-def detect_intersect(
-    sample_infos,  
-    saved_path,
-    workers=8
-):
-    os.makedirs(saved_path, exist_ok=True)
-
-    max_depths = [sample_info["max_depth"] for sample_info in sample_infos]
-    file_names = [sample_info["file_names"] for sample_info in sample_infos]
-
-    
-    combined = trimesh.util.concatenate([mesh1,mesh2])
-    cvxHull = trimesh.convex.convex_hull(combined)
-    cvxVolDist = cvxHull.volume - mesh1.volume - mesh2.volume
-    
-    results_path = os.path.join(saved_path,"results.json")
-    with open(results_path, "w") as j_f:
-        json.dump(
-            {
-                "max_depths": max_depths,
-                "mean_max_depth": np.mean(max_depths),
-
-                "volumes": volumes,
-                "mean_volume": np.mean(volumes),
-
-                "file_names": file_names,
-            },
-            j_f,
-        )
-        print("Wrote results to {}".format(results_path))
-
-def eval_adjacent(mesh_1, mesh_2):
+def eval_adjacent(mesh_1, mesh_2, scale = 0.01):
 
     eval_info = {}
+
+    scaled_mesh_1 = trimesh.Trimesh(scale * mesh_1.vertices, mesh_1.faces)
+    scaled_mesh_2 = trimesh.Trimesh(scale * mesh_2.vertices, mesh_2.faces)
+
 
     trimesh.repair.fix_normals(mesh_1)
     result_close, result_distance, _ = trimesh.proximity.closest_point(
@@ -102,9 +38,9 @@ def eval_adjacent(mesh_1, mesh_2):
     combined = trimesh.util.concatenate([mesh_1,mesh_2])
     cvxHull = trimesh.convex.convex_hull(combined)
     
+    eval_info["volumes"] = mesh_1.intersection(mesh_2, engine="auto").volume
     eval_info["cvxVolDist"] = cvxHull.volume - mesh_1.volume - mesh_2.volume
     eval_info["max_depth"] = 0 if penetrating.sum() == 0 else result_distance[penetrating == 1].max()
-    eval_info["volumes"] = mesh_1.intersection(mesh_2, engine="auto").volume
 
     return eval_info
 
