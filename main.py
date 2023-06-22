@@ -6,36 +6,19 @@ import numpy as np
 import trimesh
 from joblib import Parallel, delayed
 
-from intersection import get_sample_intersect_volume
-from intersection import mesh_vert_int_exts
+# from intersection.intersection import get_sample_intersect_volume
+from intersection.intersection import mesh_vert_int_exts
 
 import pickle
 from tqdm import tqdm
 import open3d as o3d
 import torch
 
+import re
 
-def dict_for_connected_faces(faces):
-    v2f = {}
-    for f_id, face in enumerate(faces):
-        for v in face:
-            v2f.setdefault(v, []).append(f_id)
-    return v2f
+teeth_order = {"upper": [17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27],
+               "lower": [37, 36, 35, 34, 33, 32, 31, 41, 42, 43, 44, 45, 46, 47]}
 
-def geneSampleInfos_quick(data):
-    device = o3d.core.Device('cuda' if torch.cuda.is_available() else 'CPU:0')
-    for k in data:
-        if k == "file_name":
-            continue
-        data[k] = torch.Tensor(np.stack(data[k]))
-    hand_verts = data["hand_verts"]
-    obj_verts = data["object_verts"]
-    obj_faces = data["object_faces"]
-
-# def scale_mesh(mesh:trimesh.Trimesh, scale):
-#     verts = mesh.vertices - mesh.center_mass
-#     verts = verts * scale + mesh.center_mass
-#     return verts
 
 def geneSampleInfos(fname_lists, mesh1_verts, mesh1_faces, mesh2_verts, mesh2_faces, scale=1):
     """
@@ -46,24 +29,26 @@ def geneSampleInfos(fname_lists, mesh1_verts, mesh1_faces, mesh2_verts, mesh2_fa
 
     sample_infos = []
 
-    for hand_vert, hand_face, obj_vert, obj_face in tqdm(zip(
+    for mesh1_vert, mesh1_face, mesh2_vert, mesh2_face in tqdm(zip(
         mesh1_verts, mesh1_faces, mesh2_verts, mesh2_faces
     )):
         sample_info = {
             "file_names": fname_lists,
-            "hand_verts": hand_vert * scale,
-            "hand_faces": hand_face,
-            "obj_verts": obj_vert * scale,
-            "obj_faces": obj_face,
+            "mesh1_vert": mesh1_vert * scale,
+            "mesh1_face": mesh1_face,
+            "mesh2_vert": mesh2_vert * scale,
+            "mesh2_face": mesh2_face,
         }
 
-        obj_mesh = trimesh.load({"vertices": sample_info["obj_verts"], "faces": obj_face})
-        trimesh.repair.fix_normals(obj_mesh)
+        mesh_1 = trimesh.Trimesh(sample_info["mesh1_vert"], sample_info["mesh1_face"])
+        mesh_2 = trimesh.Trimesh(sample_info["mesh2_vert"], sample_info["mesh2_face"])
+
+        trimesh.repair.fix_normals(mesh_1)
         result_close, result_distance, _ = trimesh.proximity.closest_point(
-            obj_mesh, sample_info["hand_verts"]
+            mesh_1, sample_info["mesh2_vert"]
         )
         penetrating, exterior = mesh_vert_int_exts(
-        obj_mesh, hand_vert, result_distance
+        mesh_1, mesh_2.vertices, result_distance
         )
         sample_info["max_depth"] = 0 if penetrating.sum() == 0 else result_distance[penetrating == 1].max()
 
@@ -81,10 +66,10 @@ def detect_intersect(
     max_depths = [sample_info["max_depth"] for sample_info in sample_infos]
     file_names = [sample_info["file_names"] for sample_info in sample_infos]
 
-    volumes = Parallel(n_jobs=workers, verbose=5)(
-        delayed(get_sample_intersect_volume)(sample_info)
-        for sample_info in sample_infos
-    )
+    
+    combined = trimesh.util.concatenate([mesh1,mesh2])
+    cvxHull = trimesh.convex.convex_hull(combined)
+    cvxVolDist = cvxHull.volume - mesh1.volume - mesh2.volume
     
     results_path = os.path.join(saved_path,"results.json")
     with open(results_path, "w") as j_f:
@@ -102,38 +87,67 @@ def detect_intersect(
         )
         print("Wrote results to {}".format(results_path))
 
+def eval_adjacent(mesh_1, mesh_2):
 
+    eval_info = {}
+
+    trimesh.repair.fix_normals(mesh_1)
+    result_close, result_distance, _ = trimesh.proximity.closest_point(
+        mesh_1, mesh_2.vertices
+    )
+    penetrating, exterior = mesh_vert_int_exts(
+    mesh_1, mesh_2.vertices, result_distance
+    )
+
+    combined = trimesh.util.concatenate([mesh_1,mesh_2])
+    cvxHull = trimesh.convex.convex_hull(combined)
+    
+    eval_info["cvxVolDist"] = cvxHull.volume - mesh_1.volume - mesh_2.volume
+    eval_info["max_depth"] = 0 if penetrating.sum() == 0 else result_distance[penetrating == 1].max()
+    eval_info["volumes"] = mesh_1.intersection(mesh_2, engine="auto").volume
+
+    return eval_info
+
+def get_meshes(time_root):
+    meshes = []
+    for i in range(14):
+        path = os.path.join(time_root, f"{i}.ply")
+        if not os.path.exists(path):
+            continue
+        mesh = trimesh.load(path, force='mesh')
+        meshes.append(mesh)
+    return meshes
+            
+
+def eval(results_dir, out_dir):
+    for model_name in os.listdir(results_dir):
+        print(model_name)
+        root = os.path.join(results_dir, model_name)
+        if os.path.isdir(root) is False:
+            continue
+        out_dict = {}
+        for time in os.listdir(root):
+            out_dict[time] = {}
+            meshes = get_meshes(os.path.join(root, time))
+            print(len(meshes))
+            for i in range(len(meshes)-1):
+                for j in [i-1, i+1]:
+                    if j < 0 or j >= len(meshes):
+                        continue
+                    out_dict[time][f"{i}->{j}"] = eval_adjacent(meshes[i], meshes[j])
+        out_path = os.path.join(out_dir, f"{model_name}.json")
+        with open(out_path, 'w') as fp:
+            json.dump(out_dict, fp, indent=4)
+        print(out_path)
 
 
 if __name__ == "__main__":
 
-    # data_path = "/ghome/l5/ymliu/results/oakink/baseline_0414/test_grasp_results/A01002/0/"
-    # obj_file = os.path.join(data_path, "obj_mesh_0.ply")
-    # hand_file = os.path.join(data_path, "rh_mesh_rec_0.ply")
+    # results_dir = "/Users/yumeng/Working/projects/MotionPlanning_GUI/results/"
+    results_dir = "/Users/yumeng/Working/results/teeth_motion/selected_results"
+    out_dir = "/Users/yumeng/Working/projects/MotionPlanning_GUI/eval_results/"
 
-    work_dir = "/Users/yumeng/Working/projects/MotionPlanning_GUI/"
-    data_path = os.path.join(work_dir,"data", "model_1")
-    saved_path = os.path.join(work_dir, "eval_results", "model_1")
-
-    mesh1 = trimesh.load_mesh(os.path.join(data_path, "11.ply"))
-    mesh2 = trimesh.load_mesh(os.path.join(data_path, "12.ply"))
-
-
-    # vhacd_exe = "/ghome/l5/ymliu/3rdparty/VHACD_bin/testVHACD"
-
-    sample_infos = geneSampleInfos(fname_lists=[data_path],
-                                   mesh1_verts=[mesh1.vertices],
-                                   mesh1_faces=[mesh1.faces],
-                                   mesh2_verts=[mesh2.vertices],
-                                   mesh2_faces=[mesh2.faces],
-                                   scale=0.1)
-    
-    print("<---- Get Sample Info Done ---->")
-
-    detect_intersect(sample_infos=sample_infos, saved_path=saved_path)
-
-
-    print(sample_infos)
+    eval(results_dir, out_dir)
 
 
 

@@ -2,10 +2,6 @@ import numpy as np
 import trimesh
 import torch
 
-from utils import (
-    batch_mesh_contains_points,
-)
-
 def batch_index_select(inp, dim, index):
     views = [inp.shape[0]] + [
         1 if i != dim else -1 for i in range(1, len(inp.shape))
