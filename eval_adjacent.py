@@ -19,7 +19,7 @@ import re
 teeth_order = {"upper": [17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27],
                "lower": [37, 36, 35, 34, 33, 32, 31, 41, 42, 43, 44, 45, 46, 47]}
 
-def eval_adjacent(mesh_1, mesh_2, scale = 0.01):
+def eval_adjacent(mesh_1, mesh_2, scale = 1):
 
     eval_info = {}
 
@@ -80,8 +80,8 @@ def eval(results_dir, out_dir):
 if __name__ == "__main__":
 
     # results_dir = "/Users/yumeng/Working/projects/MotionPlanning_GUI/results/"
-    results_dir = "/Users/yumeng/Working/results/teeth_motion/selected_results"
-    out_dir = "/Users/yumeng/Working/projects/MotionPlanning_GUI/eval_results/"
+    results_dir = "/Users/yumeng/Working/results/teeth_seq/eval_0625/linear/"
+    out_dir = "/Users/yumeng/Working/results/teeth_seq/eval_0625/linear_eval/"
 
     eval(results_dir, out_dir)
 
